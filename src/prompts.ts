@@ -31,7 +31,8 @@ export interface AWSConfig {
 const CONFIG_FILE_NAME = '.ekspressjs-config.json';
 
 function getConfigFilePath(): string {
-  return path.join(process.cwd(), CONFIG_FILE_NAME);
+  const dir = path.join(process.cwd(), 'ekspressjs');
+  return path.join(dir, CONFIG_FILE_NAME);
 }
 
 export function loadSavedConfig(): Partial<AWSConfig> | null {
@@ -49,6 +50,8 @@ export function loadSavedConfig(): Partial<AWSConfig> | null {
 function saveConfig(config: AWSConfig): void {
   try {
     const configPath = getConfigFilePath();
+    const dir = path.dirname(configPath);
+    fs.ensureDirSync(dir);
     const configToSave: Partial<AWSConfig> = {
       region: config.region,
       clusterName: config.clusterName,

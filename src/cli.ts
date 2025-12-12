@@ -6,8 +6,9 @@ import inquirer from 'inquirer';
 import { execSync } from 'child_process';
 import { deployToEKS } from './deploy';
 import { runDiagnostics } from './diagnose';
-import { promptAWSConfig } from './prompts';
+import { promptAWSConfig, loadSavedConfig } from './prompts';
 import { checkPrerequisites } from './utils';
+import { deleteCloudflareRecord } from './aws-utils';
 
 const program = new Command();
 
@@ -157,6 +158,46 @@ program
       execSync(deleteCmd, { stdio: 'inherit' });
 
       console.log(chalk.green(`\n✅ Deleted '${appName}' and related resources.`));
+
+      // Optional: delete Cloudflare DNS record if config available
+      const savedConfig = loadSavedConfig();
+      const hasCF =
+        savedConfig &&
+        savedConfig.domain &&
+        savedConfig.domain.domain &&
+        savedConfig.domain.cloudflareApiToken &&
+        savedConfig.domain.cloudflareZoneId;
+
+      if (hasCF) {
+        const hostname = savedConfig.domain!.subdomain
+          ? `${savedConfig.domain!.subdomain}.${savedConfig.domain!.domain}`
+          : savedConfig.domain!.domain;
+
+        const dnsAnswer = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'deleteDNS',
+            message: `Delete Cloudflare DNS record for ${hostname}?`,
+            default: false,
+          },
+        ]);
+
+        if (dnsAnswer.deleteDNS) {
+          console.log(chalk.yellow(`   Deleting Cloudflare DNS record for ${hostname}...`));
+          await deleteCloudflareRecord({
+            // minimal fields needed for DNS delete
+            appType: 'nest',
+            appName,
+            port: 3000,
+            replicas: 1,
+            region: savedConfig.region || 'us-east-1',
+            clusterName: savedConfig.clusterName || '',
+            accessKeyId: savedConfig.accessKeyId || '',
+            secretAccessKey: '',
+            domain: savedConfig.domain as any,
+          } as any);
+        }
+      }
     } catch (error: any) {
       console.error(chalk.red('\n❌ Delete failed:'));
       console.error(chalk.red(error.message));

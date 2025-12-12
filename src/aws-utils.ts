@@ -1372,7 +1372,8 @@ export async function applyManifests(config: DeployConfig, manifestsDir: string)
   }
 }
 
-export async function setupCloudflareDNS(config: DeployConfig, target: string): Promise<void> {
+// proxied defaults to true to auto-enable Cloudflare orange proxy once DNS is set
+export async function setupCloudflareDNS(config: DeployConfig, target: string, proxied: boolean = true): Promise<void> {
   if (!config.domain || !config.domain.cloudflareApiToken || !config.domain.cloudflareZoneId) {
     return;
   }
@@ -1393,7 +1394,7 @@ export async function setupCloudflareDNS(config: DeployConfig, target: string): 
         name: recordName,
         content: target,
         ttl: 1,
-        proxied: false,
+        proxied,
       },
       {
         headers: {
@@ -1431,7 +1432,7 @@ export async function setupCloudflareDNS(config: DeployConfig, target: string): 
               name: recordName,
               content: target,
               ttl: 1,
-              proxied: false,
+              proxied,
             },
             {
               headers: {
@@ -1587,7 +1588,7 @@ export async function waitForIngressAndSetupDNS(config: DeployConfig): Promise<s
       const status = certDetails.Certificate?.Status;
       
       if (status === 'ISSUED') {
-        console.log(chalk.green(`   ✓ Certificate is validated, enabling HTTPS...`));
+          console.log(chalk.green(`   ✓ Certificate is validated, enabling HTTPS...`));
         try {
           // Add HTTPS listener and certificate
           execSync(
@@ -1604,6 +1605,10 @@ export async function waitForIngressAndSetupDNS(config: DeployConfig): Promise<s
           );
           console.log(chalk.green(`   ✓ HTTPS enabled with SSL redirect`));
           console.log(chalk.cyan(`   ALB Controller will update the listener. This may take 2-3 minutes.`));
+            // Switch Cloudflare to proxied (orange) once HTTPS is ready
+            if (albDNS) {
+              await setupCloudflareDNS(config, albDNS, true);
+            }
         } catch (e) {
           console.log(chalk.yellow(`   ⚠️  Could not enable HTTPS automatically`));
         }
@@ -1794,6 +1799,46 @@ export async function waitForIngressAndSetupDNS(config: DeployConfig): Promise<s
     console.log(chalk.white(`   Type: CNAME`));
     console.log(chalk.white(`   Target: ${albDNS}`));
     return albDNS;
+  }
+}
+
+export async function deleteCloudflareRecord(config: DeployConfig): Promise<void> {
+  if (!config.domain || !config.domain.cloudflareApiToken || !config.domain.cloudflareZoneId) {
+    return;
+  }
+
+  const hostname = config.domain.subdomain
+    ? `${config.domain.subdomain}.${config.domain.domain}`
+    : config.domain.domain;
+
+  try {
+    const listResponse = await axios.get(
+      `https://api.cloudflare.com/client/v4/zones/${config.domain.cloudflareZoneId}/dns_records?name=${hostname}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${config.domain.cloudflareApiToken}`,
+        },
+      }
+    );
+
+    const records = listResponse.data.result || [];
+    if (!records.length) {
+      console.log(chalk.yellow(`   ⚠️  No Cloudflare DNS record found for ${hostname}`));
+      return;
+    }
+
+    const recordId = records[0].id;
+    await axios.delete(
+      `https://api.cloudflare.com/client/v4/zones/${config.domain.cloudflareZoneId}/dns_records/${recordId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${config.domain.cloudflareApiToken}`,
+        },
+      }
+    );
+    console.log(chalk.green(`   ✓ Cloudflare DNS record deleted: ${hostname}`));
+  } catch (error: any) {
+    console.log(chalk.yellow(`   ⚠️  Could not delete Cloudflare DNS record: ${error.message}`));
   }
 }
 
