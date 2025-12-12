@@ -81,7 +81,7 @@ program
 program
   .command('delete')
   .description('Delete an existing deployment (and related service/ingress/HPA)')
-  .option('-n, --namespace <ns>', 'Kubernetes namespace', 'default')
+  .option('-n, --namespace <ns>', 'Kubernetes namespace (optional, will prompt if not provided)')
   .action(async (options) => {
     try {
       console.log(chalk.blue.bold('\n🧹 EKSPressJS - Delete Deployment\n'));
@@ -89,18 +89,88 @@ program
       console.log(chalk.cyan('\n🔍 Checking prerequisites...\n'));
       await checkPrerequisites();
 
-      const namespace = options.namespace || 'default';
+      // Step 1: Fetch all namespaces
+      let namespaces: string[] = [];
+      try {
+        const output = execSync('kubectl get namespaces -o json', {
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        });
+        const parsed = JSON.parse(output);
+        namespaces =
+          parsed.items?.map((ns: any) => ns.metadata?.name).filter(Boolean) || [];
+      } catch (e: any) {
+        console.log(chalk.red('❌ Could not list namespaces.'));
+        if (e?.message) {
+          console.log(chalk.yellow(`   Details: ${e.message}`));
+        }
+        console.log(
+          chalk.yellow('   Check: kubectl context, AWS creds, and cluster accessibility.')
+        );
+        throw e;
+      }
+
+      if (namespaces.length === 0) {
+        console.log(chalk.yellow('⚠️  No namespaces found.'));
+        return;
+      }
+
+      // Step 2: Let user select namespace (or use provided one)
+      let namespace = options.namespace;
+      if (!namespace) {
+        const nsAnswer = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'namespace',
+            message: 'Select namespace:',
+            choices: [...namespaces, new inquirer.Separator(), 'Enter manually'],
+          },
+        ]);
+
+        if (nsAnswer.namespace === 'Enter manually') {
+          const manualNs = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'namespace',
+              message: 'Enter namespace name:',
+              validate: (input: string) => {
+                if (!input.trim()) {
+                  return 'Namespace name cannot be empty';
+                }
+                return true;
+              },
+            },
+          ]);
+          namespace = manualNs.namespace.trim();
+        } else {
+          namespace = nsAnswer.namespace;
+        }
+      }
+
+      // Step 3: Fetch deployments in selected namespace
       console.log(chalk.cyan(`\n📋 Fetching deployments in namespace '${namespace}'...`));
 
       let deployments: string[] = [];
       try {
         // Quick auth check to fail fast with clearer message
         try {
-          execSync(`kubectl auth can-i list deployments -n ${namespace}`, { stdio: 'pipe' });
+          execSync(`kubectl auth can-i list deployments -n ${namespace}`, {
+            stdio: 'pipe',
+          });
         } catch (authErr: any) {
-          console.log(chalk.red('❌ kubectl is not authorized or kubeconfig is missing.'));
-          console.log(chalk.yellow('   - Ensure AWS credentials/kubeconfig are set (aws eks update-kubeconfig ...)'));
-          console.log(chalk.yellow('   - Ensure you have permission to list deployments in this namespace.'));
+          console.log(
+            chalk.red('❌ kubectl is not authorized or kubeconfig is missing.')
+          );
+          console.log(
+            chalk.yellow(
+              '   - Ensure AWS credentials/kubeconfig are set (aws eks update-kubeconfig ...)'
+            )
+          );
+          console.log(
+            chalk.yellow(
+              `   - Ensure you have permission to list deployments in namespace '${namespace}'.`
+            )
+          );
           throw authErr;
         }
 
@@ -109,21 +179,27 @@ program
           { encoding: 'utf-8', stdio: 'pipe' }
         );
         const parsed = JSON.parse(output);
-        deployments = parsed.items?.map((d: any) => d.metadata?.name).filter(Boolean) || [];
+        deployments =
+          parsed.items?.map((d: any) => d.metadata?.name).filter(Boolean) || [];
       } catch (e: any) {
         console.log(chalk.red('❌ Could not list deployments.'));
         if (e?.message) {
           console.log(chalk.yellow(`   Details: ${e.message}`));
         }
-        console.log(chalk.yellow('   Check: kubectl context, AWS creds, and cluster accessibility.'));
+        console.log(
+          chalk.yellow('   Check: kubectl context, AWS creds, and cluster accessibility.')
+        );
         throw e;
       }
 
       if (deployments.length === 0) {
-        console.log(chalk.yellow(`⚠️  No deployments found in namespace '${namespace}'.`));
+        console.log(
+          chalk.yellow(`⚠️  No deployments found in namespace '${namespace}'.`)
+        );
         return;
       }
 
+      // Step 4: Let user select deployment to delete
       const answers = await inquirer.prompt([
         {
           type: 'list',
@@ -134,7 +210,8 @@ program
         {
           type: 'confirm',
           name: 'confirm',
-          message: (ans: any) => `Delete deployment '${ans.deploy}' and related resources (service/ingress/HPA)?`,
+          message: (ans: any) =>
+            `Delete deployment '${ans.deploy}' and related resources (service/ingress/HPA)?`,
           default: false,
           when: (ans: any) => ans.deploy !== 'Cancel',
         },
@@ -146,16 +223,66 @@ program
       }
 
       const appName = answers.deploy;
-      console.log(chalk.yellow(`\n🗑️  Deleting resources for '${appName}' in namespace '${namespace}'...`));
+      console.log(
+        chalk.yellow(
+          `\n🗑️  Deleting resources for '${appName}' in namespace '${namespace}'...\n`
+        )
+      );
 
-      const deleteCmd = [
-        `kubectl delete deployment ${appName} -n ${namespace} --ignore-not-found`,
-        `kubectl delete service ${appName}-service -n ${namespace} --ignore-not-found`,
-        `kubectl delete ingress ${appName}-ingress -n ${namespace} --ignore-not-found`,
-        `kubectl delete hpa ${appName}-hpa -n ${namespace} --ignore-not-found`,
-      ].join(' && ');
+      // Resources to delete
+      const resources = [
+        { type: 'deployment', name: appName },
+        { type: 'service', name: `${appName}-service` },
+        { type: 'ingress', name: `${appName}-ingress` },
+        { type: 'hpa', name: `${appName}-hpa` },
+      ];
 
-      execSync(deleteCmd, { stdio: 'inherit' });
+      // Create a simple spinner
+      const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+      let spinnerIndex = 0;
+      let currentResource = '';
+      let spinnerInterval: NodeJS.Timeout | null = null;
+
+      const startSpinner = (resourceName: string) => {
+        currentResource = resourceName;
+        spinnerInterval = setInterval(() => {
+          process.stdout.write(
+            `\r${chalk.cyan(spinnerFrames[spinnerIndex])} ${chalk.gray(`Deleting ${currentResource}...`)}`
+          );
+          spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
+        }, 100);
+      };
+
+      const stopSpinner = () => {
+        if (spinnerInterval) {
+          clearInterval(spinnerInterval);
+          spinnerInterval = null;
+        }
+        process.stdout.write('\r' + ' '.repeat(80) + '\r'); // Clear line
+      };
+
+      try {
+        for (const resource of resources) {
+          startSpinner(`${resource.type} '${resource.name}'`);
+          try {
+            execSync(
+              `kubectl delete ${resource.type} ${resource.name} -n ${namespace} --ignore-not-found`,
+              { stdio: 'pipe' }
+            );
+            stopSpinner();
+            console.log(chalk.green(`   ✓ ${resource.type} '${resource.name}' deleted`));
+          } catch (error: any) {
+            stopSpinner();
+            // Ignore errors for resources that don't exist (--ignore-not-found handles this)
+            if (!error.message.includes('not found')) {
+              console.log(chalk.yellow(`   ⚠ ${resource.type} '${resource.name}' - ${error.message}`));
+            }
+          }
+        }
+      } catch (error: any) {
+        stopSpinner();
+        throw error;
+      }
 
       console.log(chalk.green(`\n✅ Deleted '${appName}' and related resources.`));
 
@@ -183,7 +310,9 @@ program
         ]);
 
         if (dnsAnswer.deleteDNS) {
-          console.log(chalk.yellow(`   Deleting Cloudflare DNS record for ${hostname}...`));
+          console.log(
+            chalk.yellow(`   Deleting Cloudflare DNS record for ${hostname}...`)
+          );
           await deleteCloudflareRecord({
             // minimal fields needed for DNS delete
             appType: 'nest',
@@ -201,6 +330,9 @@ program
     } catch (error: any) {
       console.error(chalk.red('\n❌ Delete failed:'));
       console.error(chalk.red(error.message));
+      if (error.stack) {
+        console.error(chalk.gray(error.stack));
+      }
       process.exit(1);
     }
   });
