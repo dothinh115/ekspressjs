@@ -1,0 +1,12 @@
+src/
+tsconfig.json
+*.ts
+*.ts.map
+*.log
+.env
+.aws/
+.DS_Store
+node_modules/
+*.swp
+*.swo
+

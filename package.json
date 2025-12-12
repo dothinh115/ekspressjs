@@ -1,0 +1,49 @@
+{
+  "name": "ekspressjs",
+  "version": "1.0.0",
+  "description": "Deploy applications to EKS quickly and easily with ready-to-use configurations",
+  "main": "dist/index.js",
+  "bin": {
+    "ekspressjs": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "postbuild": "chmod +x dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "eks",
+    "kubernetes",
+    "deploy",
+    "aws",
+    "docker",
+    "ci-cd"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^11.1.0",
+    "inquirer": "^9.2.12",
+    "@aws-sdk/client-eks": "^3.490.0",
+    "@aws-sdk/client-ec2": "^3.490.0",
+    "@aws-sdk/client-iam": "^3.490.0",
+    "@aws-sdk/client-acm": "^3.490.0",
+    "@aws-sdk/credential-providers": "^3.490.0",
+    "chalk": "^4.1.2",
+    "fs-extra": "^11.2.0",
+    "js-yaml": "^4.1.0",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/inquirer": "^9.0.7",
+    "@types/fs-extra": "^11.0.4",
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
+
