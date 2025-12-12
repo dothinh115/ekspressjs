@@ -95,13 +95,13 @@ export async function promptAWSConfig(options: any): Promise<AWSConfig> {
     
     if (isInteractive) {
       const useSavedAnswer = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'useSaved',
-          message: 'Use saved configuration? (Skip prompts and deploy immediately)',
-          default: true,
-        },
-      ]);
+      {
+        type: 'confirm',
+        name: 'useSaved',
+        message: 'Use saved configuration? (Skip prompts and deploy immediately)',
+        default: true,
+      },
+    ]);
       useSaved = useSavedAnswer.useSaved;
     } else {
       console.log(chalk.cyan('   Non-interactive mode: Using saved configuration automatically\n'));
@@ -115,46 +115,46 @@ export async function promptAWSConfig(options: any): Promise<AWSConfig> {
 
       if (detectedCreds && detectedCreds.secretAccessKey) {
         if (isInteractive) {
-          const useDetected = await inquirer.prompt([
+        const useDetected = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'useDetected',
+            message: `Use detected AWS Secret Access Key from AWS CLI?`,
+            default: true,
+          },
+        ]);
+
+        if (useDetected.useDetected) {
+          secretAccessKey = detectedCreds.secretAccessKey;
+        } else {
+          const secretAnswer = await inquirer.prompt([
             {
-              type: 'confirm',
-              name: 'useDetected',
-              message: `Use detected AWS Secret Access Key from AWS CLI?`,
-              default: true,
+              type: 'password',
+              name: 'secretAccessKey',
+              message: 'AWS Secret Access Key:',
+              mask: '*',
+              validate: (input: string) => input.length > 0 || 'Secret Access Key is required',
             },
           ]);
-
-          if (useDetected.useDetected) {
-            secretAccessKey = detectedCreds.secretAccessKey;
-          } else {
-            const secretAnswer = await inquirer.prompt([
-              {
-                type: 'password',
-                name: 'secretAccessKey',
-                message: 'AWS Secret Access Key:',
-                mask: '*',
-                validate: (input: string) => input.length > 0 || 'Secret Access Key is required',
-              },
-            ]);
-            secretAccessKey = secretAnswer.secretAccessKey;
-          }
-        } else {
+          secretAccessKey = secretAnswer.secretAccessKey;
+        }
+      } else {
           // Non-interactive: auto-use detected credentials
           secretAccessKey = detectedCreds.secretAccessKey;
           console.log(chalk.green('   ✓ Using AWS Secret Access Key from AWS CLI\n'));
         }
       } else {
         if (isInteractive) {
-          const secretAnswer = await inquirer.prompt([
-            {
-              type: 'password',
-              name: 'secretAccessKey',
-              message: 'AWS Secret Access Key (not saved in config file):',
-              mask: '*',
-              validate: (input: string) => input.length > 0 || 'Secret Access Key is required',
-            },
-          ]);
-          secretAccessKey = secretAnswer.secretAccessKey;
+        const secretAnswer = await inquirer.prompt([
+          {
+            type: 'password',
+            name: 'secretAccessKey',
+            message: 'AWS Secret Access Key (not saved in config file):',
+            mask: '*',
+            validate: (input: string) => input.length > 0 || 'Secret Access Key is required',
+          },
+        ]);
+        secretAccessKey = secretAnswer.secretAccessKey;
         } else {
           throw new Error('AWS Secret Access Key not found. Please configure AWS CLI or provide credentials.');
         }

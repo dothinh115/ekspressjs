@@ -2,6 +2,8 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import inquirer from 'inquirer';
+import { execSync } from 'child_process';
 import { deployToEKS } from './deploy';
 import { runDiagnostics } from './diagnose';
 import { promptAWSConfig } from './prompts';
@@ -70,6 +72,93 @@ program
       await runDiagnostics(options);
     } catch (error: any) {
       console.error(chalk.red('\n❌ Diagnostics failed:'));
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('delete')
+  .description('Delete an existing deployment (and related service/ingress/HPA)')
+  .option('-n, --namespace <ns>', 'Kubernetes namespace', 'default')
+  .action(async (options) => {
+    try {
+      console.log(chalk.blue.bold('\n🧹 EKSPressJS - Delete Deployment\n'));
+
+      console.log(chalk.cyan('\n🔍 Checking prerequisites...\n'));
+      await checkPrerequisites();
+
+      const namespace = options.namespace || 'default';
+      console.log(chalk.cyan(`\n📋 Fetching deployments in namespace '${namespace}'...`));
+
+      let deployments: string[] = [];
+      try {
+        // Quick auth check to fail fast with clearer message
+        try {
+          execSync(`kubectl auth can-i list deployments -n ${namespace}`, { stdio: 'pipe' });
+        } catch (authErr: any) {
+          console.log(chalk.red('❌ kubectl is not authorized or kubeconfig is missing.'));
+          console.log(chalk.yellow('   - Ensure AWS credentials/kubeconfig are set (aws eks update-kubeconfig ...)'));
+          console.log(chalk.yellow('   - Ensure you have permission to list deployments in this namespace.'));
+          throw authErr;
+        }
+
+        const output = execSync(
+          `kubectl get deployments -n ${namespace} -o json`,
+          { encoding: 'utf-8', stdio: 'pipe' }
+        );
+        const parsed = JSON.parse(output);
+        deployments = parsed.items?.map((d: any) => d.metadata?.name).filter(Boolean) || [];
+      } catch (e: any) {
+        console.log(chalk.red('❌ Could not list deployments.'));
+        if (e?.message) {
+          console.log(chalk.yellow(`   Details: ${e.message}`));
+        }
+        console.log(chalk.yellow('   Check: kubectl context, AWS creds, and cluster accessibility.'));
+        throw e;
+      }
+
+      if (deployments.length === 0) {
+        console.log(chalk.yellow(`⚠️  No deployments found in namespace '${namespace}'.`));
+        return;
+      }
+
+      const answers = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'deploy',
+          message: 'Select deployment to delete:',
+          choices: [...deployments, new inquirer.Separator(), 'Cancel'],
+        },
+        {
+          type: 'confirm',
+          name: 'confirm',
+          message: (ans: any) => `Delete deployment '${ans.deploy}' and related resources (service/ingress/HPA)?`,
+          default: false,
+          when: (ans: any) => ans.deploy !== 'Cancel',
+        },
+      ]);
+
+      if (answers.deploy === 'Cancel' || !answers.confirm) {
+        console.log(chalk.yellow('Cancelled.'));
+        return;
+      }
+
+      const appName = answers.deploy;
+      console.log(chalk.yellow(`\n🗑️  Deleting resources for '${appName}' in namespace '${namespace}'...`));
+
+      const deleteCmd = [
+        `kubectl delete deployment ${appName} -n ${namespace} --ignore-not-found`,
+        `kubectl delete service ${appName}-service -n ${namespace} --ignore-not-found`,
+        `kubectl delete ingress ${appName}-ingress -n ${namespace} --ignore-not-found`,
+        `kubectl delete hpa ${appName}-hpa -n ${namespace} --ignore-not-found`,
+      ].join(' && ');
+
+      execSync(deleteCmd, { stdio: 'inherit' });
+
+      console.log(chalk.green(`\n✅ Deleted '${appName}' and related resources.`));
+    } catch (error: any) {
+      console.error(chalk.red('\n❌ Delete failed:'));
       console.error(chalk.red(error.message));
       process.exit(1);
     }

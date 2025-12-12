@@ -1,6 +1,6 @@
 {
   "name": "ekspressjs",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Deploy applications to EKS quickly and easily with ready-to-use configurations",
   "main": "dist/index.js",
   "bin": {
@@ -20,7 +20,12 @@
     "docker",
     "ci-cd"
   ],
-  "author": "",
+  "author": "<dothinh115@gmail.com>",
+  "homepage": "https://github.com/dothinh115/ekspressjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dothinh115/ekspressjs.git"
+  },
   "license": "MIT",
   "dependencies": {
     "commander": "^11.1.0",
