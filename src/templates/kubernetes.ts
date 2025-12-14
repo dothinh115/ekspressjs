@@ -9,11 +9,18 @@ export function generateDeploymentManifest(config: AWSConfig, appType: AppType):
   const port = appType === 'react' || appType === 'vue' ? 80 : config.port;
   const healthPath = config.healthCheckPath || '/';
 
+  // Only set NODE_ENV for Node.js apps
+  const isNodeApp = ['next', 'nuxt', 'nest', 'react', 'vue'].includes(appType);
+  
   let envSection = `        env:
         - name: PORT
-          value: "${port}"
+          value: "${port}"`;
+  
+  if (isNodeApp) {
+    envSection += `
         - name: NODE_ENV
           value: "production"`;
+  }
 
   if (config.envVars && config.envVars.length > 0) {
     for (const envVar of config.envVars) {

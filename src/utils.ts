@@ -390,6 +390,11 @@ export function detectAWSCredentials(): { accessKeyId?: string; secretAccessKey?
 }
 
 export function validateProjectStructure(appType: string): void {
+  // Skip validation for Java - Dockerfile is required and checked separately
+  if (appType === 'java') {
+    return;
+  }
+
   const requiredFiles: Record<string, string[]> = {
     next: ['package.json', 'next.config.js'],
     nuxt: ['package.json', 'nuxt.config.ts', 'nuxt.config.js'],

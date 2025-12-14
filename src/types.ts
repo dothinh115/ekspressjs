@@ -1,4 +1,4 @@
-export type AppType = 'next' | 'nuxt' | 'nest' | 'react' | 'vue';
+export type AppType = 'next' | 'nuxt' | 'nest' | 'react' | 'vue' | 'java';
 
 export interface ResourceLimits {
   cpu: string;
@@ -58,7 +58,6 @@ export interface DeployConfig {
   secrets?: Record<string, string>;
   configMaps?: Record<string, string>;
   healthCheckPath?: string;
-  enableMetrics?: boolean;
   // Optional directory to store generated deployment artifacts (Dockerfile, k8s/)
   artifactDir?: string;
 }

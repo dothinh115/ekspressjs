@@ -1,6 +1,6 @@
 {
   "name": "ekspressjs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deploy applications to EKS quickly and easily with ready-to-use configurations",
   "main": "dist/index.js",
   "bin": {

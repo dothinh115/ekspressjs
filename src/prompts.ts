@@ -25,7 +25,6 @@ export interface AWSConfig {
   secrets?: Record<string, string>;
   configMaps?: Record<string, string>;
   healthCheckPath?: string;
-  enableMetrics?: boolean;
 }
 
 const CONFIG_FILE_NAME = '.ekspressjs-config.json';
@@ -69,7 +68,6 @@ function saveConfig(config: AWSConfig): void {
       secrets: config.secrets,
       configMaps: config.configMaps,
       healthCheckPath: config.healthCheckPath,
-      enableMetrics: config.enableMetrics,
     };
     fs.writeJsonSync(configPath, configToSave, { spaces: 2 });
   } catch (error) {
@@ -181,7 +179,6 @@ export async function promptAWSConfig(options: any): Promise<AWSConfig> {
         secrets: savedConfig.secrets,
         configMaps: savedConfig.configMaps,
         healthCheckPath: savedConfig.healthCheckPath || '/',
-        enableMetrics: savedConfig.enableMetrics || false,
       };
 
       console.log(chalk.green('✓ Configuration loaded from file\n'));
@@ -687,38 +684,6 @@ export async function promptAWSConfig(options: any): Promise<AWSConfig> {
       message: 'Health Check Path:',
       default: '/',
     },
-    {
-      type: 'confirm',
-      name: 'addEnvVars',
-      message: 'Add environment variables?',
-      default: false,
-    },
-    {
-      type: 'input',
-      name: 'envVars',
-      message: 'Environment variables (format: KEY1=value1,KEY2=value2):',
-      when: (answers: any) => answers.addEnvVars,
-      default: '',
-    },
-    {
-      type: 'confirm',
-      name: 'addSecrets',
-      message: 'Add secrets?',
-      default: false,
-    },
-    {
-      type: 'input',
-      name: 'secrets',
-      message: 'Secrets (format: KEY1=secret1,KEY2=secret2):',
-      when: (answers: any) => answers.addSecrets,
-      default: '',
-    },
-    {
-      type: 'confirm',
-      name: 'enableMetrics',
-      message: 'Enable metrics collection?',
-      default: false,
-    },
   ]);
 
   const config: AWSConfig = {
@@ -733,7 +698,6 @@ export async function promptAWSConfig(options: any): Promise<AWSConfig> {
     namespace: basicAnswers.namespace || 'default',
     enableIngress: basicAnswers.enableIngress,
     healthCheckPath: advancedAnswers.healthCheckPath || '/',
-    enableMetrics: advancedAnswers.enableMetrics,
   };
 
   if (domainAnswers.configureDomain) {
@@ -769,33 +733,185 @@ export async function promptAWSConfig(options: any): Promise<AWSConfig> {
     };
   }
 
-  if (advancedAnswers.addEnvVars && advancedAnswers.envVars) {
-    const envVars: EnvVar[] = [];
-    const pairs = advancedAnswers.envVars.split(',');
-    for (const pair of pairs) {
-      const [name, value] = pair.split('=').map((s: string) => s.trim());
-      if (name && value) {
-        envVars.push({ name, value });
-      }
-    }
-    config.envVars = envVars.length > 0 ? envVars : undefined;
-  }
-
-  if (advancedAnswers.addSecrets && advancedAnswers.secrets) {
-    const secrets: Record<string, string> = {};
-    const pairs = advancedAnswers.secrets.split(',');
-    for (const pair of pairs) {
-      const [key, value] = pair.split('=').map((s: string) => s.trim());
-      if (key && value) {
-        secrets[key] = value;
-      }
-    }
-    config.secrets = Object.keys(secrets).length > 0 ? secrets : undefined;
-  }
+  // Handle environment variables configuration
+  await configureEnvironmentVariables(config);
 
   saveConfig(config);
   console.log(chalk.green('\n✓ Configuration saved to .ekspressjs-config.json\n'));
 
   return config;
+}
+
+async function configureEnvironmentVariables(config: AWSConfig): Promise<void> {
+  console.log(chalk.cyan('\n📝 Environment Variables Configuration\n'));
+
+  // Step 1: Ask if using .env file
+  const useEnvFileAnswer = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'useEnvFile',
+      message: 'Use .env file from project?',
+      default: true,
+    },
+  ]);
+
+  const envVars: EnvVar[] = [];
+  const secrets: Record<string, string> = {};
+
+  if (useEnvFileAnswer.useEnvFile) {
+    // Try to find .env file
+    const envFiles = ['.env', '.env.local', '.env.production'];
+    let envFilePath: string | null = null;
+    let envContent = '';
+
+    for (const envFile of envFiles) {
+      const filePath = path.join(process.cwd(), envFile);
+      if (await fs.pathExists(filePath)) {
+        envFilePath = filePath;
+        envContent = await fs.readFile(filePath, 'utf-8');
+        console.log(chalk.green(`   ✓ Found ${envFile}`));
+        break;
+      }
+    }
+
+    if (!envFilePath) {
+      console.log(chalk.yellow('   ⚠️  No .env file found. Switching to manual input.'));
+    } else {
+      // Parse .env file
+      const envVarsFromFile: Record<string, string> = {};
+      const lines = envContent.split('\n');
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        // Skip comments and empty lines
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        
+        // Parse KEY=VALUE format
+        const equalIndex = trimmed.indexOf('=');
+        if (equalIndex > 0) {
+          const key = trimmed.substring(0, equalIndex).trim();
+          let value = trimmed.substring(equalIndex + 1).trim();
+          
+          // Remove quotes if present
+          if ((value.startsWith('"') && value.endsWith('"')) || 
+              (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+          }
+          
+          if (key && value) {
+            envVarsFromFile[key] = value;
+          }
+        }
+      }
+
+      if (Object.keys(envVarsFromFile).length === 0) {
+        console.log(chalk.yellow('   ⚠️  No environment variables found in .env file.'));
+      } else {
+        console.log(chalk.cyan(`   Found ${Object.keys(envVarsFromFile).length} environment variables`));
+        
+        // Ask for each variable if it should be a secret
+        for (const [key, value] of Object.entries(envVarsFromFile)) {
+          // Mask value for display (show first 3 chars)
+          const displayValue = value.length > 6 
+            ? `${value.substring(0, 3)}${'*'.repeat(Math.min(value.length - 3, 10))}`
+            : '***';
+          
+          const secretAnswer = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'isSecret',
+              message: `Is "${key}" (${displayValue}) a secret?`,
+              default: key.toLowerCase().includes('password') || 
+                       key.toLowerCase().includes('secret') || 
+                       key.toLowerCase().includes('key') ||
+                       key.toLowerCase().includes('token'),
+            },
+          ]);
+
+          if (secretAnswer.isSecret) {
+            secrets[key] = value;
+          } else {
+            envVars.push({ name: key, value });
+          }
+        }
+      }
+    }
+  }
+
+  // If not using .env file or .env file not found, ask for manual input
+  if (!useEnvFileAnswer.useEnvFile || (envVars.length === 0 && Object.keys(secrets).length === 0)) {
+    const manualInputAnswer = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'addEnvVars',
+        message: 'Add environment variables manually?',
+        default: false,
+      },
+    ]);
+
+    if (manualInputAnswer.addEnvVars) {
+      console.log(chalk.cyan('\n   Enter environment variables (format: KEY=value), press Enter to save, type "done" to finish:\n'));
+      
+      while (true) {
+        const inputAnswer = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'envVar',
+            message: 'Environment variable (KEY=value) or "done" to finish:',
+            validate: (input: string) => {
+              if (input.toLowerCase() === 'done') return true;
+              if (!input.includes('=')) {
+                return 'Format must be KEY=value or "done"';
+              }
+              const [key] = input.split('=');
+              if (!key || !key.trim()) {
+                return 'Key cannot be empty';
+              }
+              return true;
+            },
+          },
+        ]);
+
+        if (inputAnswer.envVar.toLowerCase() === 'done') {
+          break;
+        }
+
+        const [key, ...valueParts] = inputAnswer.envVar.split('=');
+        const value = valueParts.join('=').trim();
+        const trimmedKey = key.trim();
+
+        if (trimmedKey && value) {
+          const secretAnswer = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'isSecret',
+              message: `Is "${trimmedKey}" a secret?`,
+              default: false,
+            },
+          ]);
+
+          if (secretAnswer.isSecret) {
+            secrets[trimmedKey] = value;
+            console.log(chalk.green(`   ✓ Added secret: ${trimmedKey}`));
+          } else {
+            envVars.push({ name: trimmedKey, value });
+            console.log(chalk.green(`   ✓ Added env var: ${trimmedKey}`));
+          }
+        }
+      }
+    }
+  }
+
+  // Set config
+  if (envVars.length > 0) {
+    config.envVars = envVars;
+  }
+  if (Object.keys(secrets).length > 0) {
+    config.secrets = secrets;
+  }
+
+  if (envVars.length > 0 || Object.keys(secrets).length > 0) {
+    console.log(chalk.green(`\n   ✓ Configured ${envVars.length} environment variables and ${Object.keys(secrets).length} secrets\n`));
+  }
 }
 

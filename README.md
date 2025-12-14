@@ -5,11 +5,13 @@ Deploy applications to Amazon EKS quickly and easily with ready-to-use configura
 ## Features
 
 - 🎯 One-command deployment to EKS
-- 📦 Support for multiple frameworks (Next.js, Nuxt.js, Node.js, NestJS, React, Vue, etc.)
-- ⚙️ Automatic Dockerfile generation
+- 📦 Support for multiple frameworks (Next.js, Nuxt.js, NestJS, React, Vue, Java)
+- ⚙️ Automatic Dockerfile generation (or use your existing Dockerfile)
 - ☸️ Kubernetes manifests generation
 - 🔐 AWS configuration prompts
 - 🚀 Ready-to-use configurations
+- 📝 Smart environment variables management (supports .env files)
+- 🗑️ Easy deployment deletion with namespace selection
 
 ## Installation
 
@@ -20,7 +22,15 @@ npm install -g ekspressjs
 Or use with npx (no installation needed):
 
 ```bash
-npx ekspressjs --app next
+npx ekspressjs --framework next
+```
+
+### Get Help
+
+```bash
+npx ekspressjs --help
+# or
+npx ekspressjs -h
 ```
 
 ## Usage
@@ -28,13 +38,14 @@ npx ekspressjs --app next
 ### Basic Usage
 
 ```bash
+# With framework specified
 npx ekspressjs --framework <framework-type>
-```
 
-Or use the shorter alias:
-
-```bash
+# Or use shorter alias
 npx ekspressjs -f <framework-type>
+
+# Without framework (requires Dockerfile in project root)
+npx ekspressjs
 ```
 
 ### Supported Application Types
@@ -44,6 +55,9 @@ npx ekspressjs -f <framework-type>
 - `nest` - NestJS applications
 - `react` - React applications (static)
 - `vue` - Vue.js applications (static)
+- `java` - Java applications (Spring Boot, etc.)
+
+**Note:** If you don't specify `--framework` and have a `Dockerfile` in your project root, the tool will automatically detect and use it (framework type will be set to `java`).
 
 ### Examples
 
@@ -56,6 +70,15 @@ npx ekspressjs --framework nuxt
 
 # Deploy NestJS app
 npx ekspressjs --framework nest
+
+# Deploy Java app with custom port
+npx ekspressjs --framework java --port 8080
+
+# Deploy without specifying framework (uses Dockerfile if exists)
+npx ekspressjs --port 8080
+
+# Deploy with custom name and port
+npx ekspressjs --framework nest --name my-api --port 3000
 ```
 
 ## Configuration
@@ -83,16 +106,49 @@ When you run the command, you'll be prompted to enter:
 ### Advanced Configuration
 - **Resource Limits** - CPU and memory requests/limits
 - **Autoscaling** - Horizontal Pod Autoscaler configuration
-- **Environment Variables** - Custom environment variables
-- **Secrets** - Kubernetes secrets for sensitive data
+- **Environment Variables** - Smart environment variable management:
+  - Option 1: Use `.env` file from project (automatically detects `.env`, `.env.local`, or `.env.production`)
+  - Option 2: Manual input (enter `KEY=value` format, type "done" to finish)
+  - For each variable, you can mark it as a secret (stored in Kubernetes Secrets) or regular env var
+- **Secrets** - Automatically created from environment variables marked as secrets
 - **Health Check Path** - Custom health check endpoint
-- **Metrics** - Enable metrics collection
+
+## Commands
+
+### Deploy
+```bash
+npx ekspressjs [options]
+```
+
+### Delete Deployment
+```bash
+npx ekspressjs delete [options]
+```
+
+This command will:
+- List all available namespaces
+- Let you select a namespace (or enter manually)
+- List all deployments in the selected namespace
+- Let you select which deployment to delete
+- Delete the deployment and related resources (service, ingress, HPA)
+
+Options:
+- `-n, --namespace <ns>` - Specify namespace directly (optional, will prompt if not provided)
+
+### Diagnose
+```bash
+npx ekspressjs diagnose [options]
+# or
+npx ekspressjs doctor
+```
+
+Check system health and debug stuck deployments.
 
 ## What It Does
 
 1. ✅ **Auto-detects prerequisites** and guides installation if missing
 2. ✅ **Auto-detects existing EKS clusters** or helps create new ones
-3. ✅ Generates optimized Dockerfile for your app type
+3. ✅ Generates optimized Dockerfile for your app type (or uses existing Dockerfile)
 4. ✅ Creates Kubernetes deployment manifests with custom resources
 5. ✅ Creates Kubernetes service manifests
 6. ✅ Creates ingress configuration with domain and SSL
@@ -102,7 +158,7 @@ When you run the command, you'll be prompted to enter:
 10. ✅ Pushes to ECR (or Docker Hub)
 11. ✅ Deploys to EKS cluster
 12. ✅ Sets up autoscaling (if enabled)
-13. ✅ Configures secrets and environment variables
+13. ✅ Configures secrets and environment variables (supports .env files)
 14. ✅ **Your app is accessible via domain immediately after deployment!**
 
 ## Requirements
@@ -215,6 +271,31 @@ Ensure your `nuxt.config.ts` is properly configured for production builds.
 ### NestJS
 Ensure your NestJS app has a `build` script in `package.json` that compiles TypeScript to the `dist` folder. The default entry point is `dist/main.js`.
 
+### Java
+- If you have a `Dockerfile` in your project root, it will be used automatically
+- If not, a default Java Dockerfile will be generated (Maven-based)
+- Ensure your Java app exposes the correct port (default: 3000, can be changed with `--port`)
+
+### Environment Variables
+
+EKSPressJS supports smart environment variable management:
+
+1. **Using .env file** (Recommended):
+   - Place a `.env`, `.env.local`, or `.env.production` file in your project root
+   - During deployment, the tool will:
+     - Automatically detect and parse the .env file
+     - Ask for each variable whether it should be a secret
+     - Automatically suggest secrets for variables containing "password", "secret", "key", or "token"
+     - Store secrets in Kubernetes Secrets, regular vars as environment variables
+
+2. **Manual input**:
+   - Enter variables in `KEY=value` format
+   - Press Enter to save each variable
+   - Type "done" to finish
+   - For each variable, mark it as secret or regular env var
+
+**Best Practice:** Sensitive values (passwords, API keys, tokens) should be marked as secrets and will be stored securely in Kubernetes Secrets.
+
 ### Docker Registry
 - **ECR**: Provide full ECR repository URI (e.g., `123456789.dkr.ecr.us-east-1.amazonaws.com`)
 - **Docker Hub**: Provide your Docker Hub username
@@ -223,11 +304,14 @@ Ensure your NestJS app has a `build` script in `package.json` that compiles Type
 ## Generated Files & Layout
 
 - All artifacts are placed under `./ekspressjs/` (keeps your project clean).
-- If you already have a `Dockerfile` at project root, it is reused (copied into `./ekspressjs/Dockerfile`). Otherwise a Dockerfile is generated.
+- Configuration is saved to `./ekspressjs/.ekspressjs-config.json` for future deployments.
+- If you already have a `Dockerfile` at project root, it is reused (copied into `./ekspressjs/Dockerfile`). Otherwise a Dockerfile is generated based on your framework type.
 - Kubernetes manifests are written to:
   - `ekspressjs/k8s/deployment.yaml`
   - `ekspressjs/k8s/service.yaml`
   - `ekspressjs/k8s/ingress.yaml` (when ingress enabled)
+  - `ekspressjs/k8s/hpa.yaml` (when autoscaling enabled)
+  - `ekspressjs/k8s/secrets.yaml` (when secrets are configured)
 
 ## Troubleshooting
 
@@ -246,27 +330,60 @@ Ensure your NestJS app has a `build` script in `package.json` that compiles Type
 - For Docker Hub: Ensure you're logged in: `docker login`
 
 ### Deployment Stuck
+- Use the diagnose command: `npx ekspressjs diagnose`
 - Check pod status: `kubectl get pods -n <namespace>`
 - View logs: `kubectl logs <pod-name> -n <namespace>`
 - Check events: `kubectl describe pod <pod-name> -n <namespace>`
+
+### Delete Deployment
+- Use: `npx ekspressjs delete`
+- The tool will guide you through selecting namespace and deployment
+- Or specify namespace directly: `npx ekspressjs delete --namespace production`
 
 ## Examples
 
 ### Deploy Next.js App
 ```bash
 cd my-nextjs-app
-npx ekspressjs --app next
+npx ekspressjs --framework next
 ```
 
-### Deploy with Custom Port
+### Deploy Java App with Custom Port
 ```bash
-npx ekspressjs --framework nest --port 8080
+cd my-java-app
+npx ekspressjs --framework java --port 8080 --name my-api
+```
+
+### Deploy with Existing Dockerfile
+```bash
+# If you have a Dockerfile, you can skip --framework
+cd my-app
+npx ekspressjs --port 8080
 ```
 
 ### Deploy with Custom Replicas
 ```bash
 npx ekspressjs --framework nest --replicas 5
 ```
+
+### Deploy with Custom Name
+```bash
+npx ekspressjs --framework next --name my-frontend
+```
+
+### Delete a Deployment
+```bash
+# Interactive mode (will prompt for namespace and deployment)
+npx ekspressjs delete
+
+# With namespace specified
+npx ekspressjs delete --namespace production
+```
+
+### Using Saved Configuration
+After your first deployment, configuration is saved to `.ekspressjs-config.json`. On subsequent runs, you can:
+- Use saved config automatically (recommended)
+- Or reconfigure everything from scratch
 
 ## Contributing
 

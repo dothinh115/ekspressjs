@@ -32,16 +32,9 @@ export async function deployToEKS(config: DeployConfig): Promise<void> {
   }
 
   console.log(chalk.yellow('📝 Step 1: Generating Dockerfile...'));
-  const rootDockerfile = path.join(process.cwd(), 'Dockerfile');
-  const artifactDockerfile = path.join(artifactsDir, 'Dockerfile');
-  if (await fs.pathExists(rootDockerfile)) {
-    console.log(chalk.cyan('   Found existing Dockerfile at project root. Using it.'));
-    await fs.copy(rootDockerfile, artifactDockerfile);
-  } else {
-    const dockerfile = generateDockerfile(config.appType, config.port);
-    await fs.writeFile(artifactDockerfile, dockerfile);
-    console.log(chalk.green('✅ Dockerfile generated'));
-  }
+  const dockerfile = generateDockerfile(config.appType, config.port);
+  await fs.writeFile(path.join(artifactsDir, 'Dockerfile'), dockerfile);
+  console.log(chalk.green('✅ Dockerfile generated'));
 
   console.log(chalk.yellow('\n📝 Step 2: Generating Kubernetes manifests...'));
 

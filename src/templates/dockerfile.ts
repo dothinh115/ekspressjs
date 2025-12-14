@@ -150,6 +150,32 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]`,
+
+    java: `FROM maven:3.9-eclipse-temurin-17 AS builder
+
+WORKDIR /app
+
+COPY pom.xml .
+COPY src ./src
+
+RUN mvn clean package -DskipTests
+
+FROM eclipse-temurin:17-jre-alpine
+
+WORKDIR /app
+
+RUN addgroup -g 1001 -S appuser && \\
+    adduser -S appuser -u 1001
+
+COPY --from=builder /app/target/*.jar app.jar
+
+USER appuser
+
+EXPOSE ${port}
+
+ENV PORT=${port}
+
+ENTRYPOINT ["java", "-jar", "app.jar"]`,
   };
 
   if (!dockerfiles[appType]) {
